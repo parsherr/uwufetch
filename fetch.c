@@ -291,12 +291,13 @@ void* get_gpu(void* argp) {
 #endif
   FILE* gpu;
 #ifndef _WIN32
-  LOG_I("getting gpus with lshw");
-  gpu = popen("lshw -class display 2> /dev/null", "r");
+  // PERFORMANCE: Skip slow lshw, use faster lspci directly
+  LOG_I("getting gpus with lspci (faster method)");
+  gpu = popen("lspci -mm 2> /dev/null | grep \"VGA\" | awk -F '\"' '{print $4 $5 $6}'", "r");
 
   // add all gpus to the array gpu_model
   while (fgets(buffer, BUFFER_SIZE, gpu))
-    if (sscanf(buffer, "    product: %[^\n]", user_info->gpu_model[gpuc])) gpuc++;
+    if (sscanf(buffer, "%[^\n]", user_info->gpu_model[gpuc])) gpuc++;
 #endif
 
   if (strlen(user_info->gpu_model[0]) < 2) {
@@ -364,24 +365,25 @@ void* get_pkg(void* argp) { // this is just a function that returns the total of
   user_info->pkgs        = 0;
 #ifndef __APPLE__
   #ifndef _WIN32
-  // all supported package managers
+  // PERFORMANCE: Only check main package manager first for speed
   struct package_manager pkgmans[] = {
+      {PKGPATH "pacman", "pacman -Qq 2> /dev/null | wc -l", "(pacman)"}, // Check primary first
       {PKGPATH "apt", "apt list --installed 2> /dev/null | wc -l", "(apt)"},
-      {PKGPATH "apk", "apk info 2> /dev/null | wc -l", "(apk)"},
-      // {PKGPATH"dnf","dnf list installed 2> /dev/null | wc -l", "(dnf)"}, // according to https://stackoverflow.com/questions/48570019/advantages-of-dnf-vs-rpm-on-fedora, dnf and rpm return the same number of packages
-      {PKGPATH "qlist", "qlist -I 2> /dev/null | wc -l", "(emerge)"},
       {PKGPATH "flatpak", "flatpak list 2> /dev/null | wc -l", "(flatpak)"},
       {PKGPATH "snap", "snap list 2> /dev/null | wc -l", "(snap)"},
-      {PKGPATH "guix", "guix package --list-installed 2> /dev/null | wc -l", "(guix)"},
-      {PKGPATH "nix-store", "nix-store -q --requisites /run/current-system/sw 2> /dev/null | wc -l", "(nix)"},
-      {PKGPATH "pacman", "pacman -Qq 2> /dev/null | wc -l", "(pacman)"},
-      {PKGPATH "pkg", "pkg info 2>/dev/null | wc -l", "(pkg)"},
-      {PKGPATH "pkg_info", "pkg_info 2>/dev/null | wc -l | sed \"s/ //g\"", "(pkg)"},
-      {PKGPATH "port", "port installed 2> /dev/null | tail -n +2 | wc -l", "(port)"},
-      {PKGPATH "brew", "find $(brew --cellar 2>/dev/stdout) -maxdepth 1 -type d 2> /dev/null | wc -l | awk '{print $1}'", "(brew-cellar)"},
-      {PKGPATH "brew", "find $(brew --caskroom 2>/dev/stdout) -maxdepth 1 -type d 2> /dev/null | wc -l | awk '{print $1}'", "(brew-cask)"},
-      {PKGPATH "rpm", "rpm -qa --last 2> /dev/null | wc -l", "(rpm)"},
-      {PKGPATH "xbps-query", "xbps-query -l 2> /dev/null | wc -l", "(xbps)"}};
+      // Disable slow package managers by default - uncomment if needed
+      // {PKGPATH "apk", "apk info 2> /dev/null | wc -l", "(apk)"},
+      // {PKGPATH "qlist", "qlist -I 2> /dev/null | wc -l", "(emerge)"},
+      // {PKGPATH "guix", "guix package --list-installed 2> /dev/null | wc -l", "(guix)"},
+      // {PKGPATH "nix-store", "nix-store -q --requisites /run/current-system/sw 2> /dev/null | wc -l", "(nix)"},
+      // {PKGPATH "pkg", "pkg info 2>/dev/null | wc -l", "(pkg)"},
+      // {PKGPATH "pkg_info", "pkg_info 2>/dev/null | wc -l | sed \"s/ //g\"", "(pkg)"},
+      // {PKGPATH "port", "port installed 2> /dev/null | tail -n +2 | wc -l", "(port)"},
+      // {PKGPATH "brew", "find $(brew --cellar 2>/dev/stdout) -maxdepth 1 -type d 2> /dev/null | wc -l | awk '{print $1}'", "(brew-cellar)"},
+      // {PKGPATH "brew", "find $(brew --caskroom 2>/dev/stdout) -maxdepth 1 -type d 2> /dev/null | wc -l | awk '{print $1}'", "(brew-cask)"},
+      // {PKGPATH "rpm", "rpm -qa --last 2> /dev/null | wc -l", "(rpm)"},
+      // {PKGPATH "xbps-query", "xbps-query -l 2> /dev/null | wc -l", "(xbps)"}
+      };
   #endif
 #else
   struct package_manager pkgmans[] = {{"/usr/local/bin/brew", "find $(brew --cellar 2>/dev/stdout) -maxdepth 1 -type d 2> /dev/null | wc -l | awk '{print $1}' > /tmp/uwufetch_brew_tmp", "(brew-cellar)"},
@@ -396,6 +398,7 @@ void* get_pkg(void* argp) { // this is just a function that returns the total of
     unsigned int pkg_count = 0;
     LOG_I("trying pkgman %d: %s", i, current->pkgman_name);
     LOG_V(current->command_path);
+    // PERFORMANCE: Quick access check to avoid slow popen calls
     if (access(current->command_path, F_OK) != -1) {
   #ifndef __APPLE__
       FILE* fp = popen(current->command_string, "r"); // trying current package manager

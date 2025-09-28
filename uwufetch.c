@@ -728,6 +728,9 @@ int main(int argc, char* argv[]) {
   struct configuration config_flags   = parse_config(&user_info, &user_config_file);
   char* custom_distro_name            = NULL;
   char* custom_image_name             = NULL;
+  
+  // PERFORMANCE: Auto-enable cache by default for speed
+  user_config_file.read_enabled = true;
 
 #ifdef _WIN32
   // packages disabled by default because chocolatey is too slow
@@ -795,18 +798,20 @@ int main(int argc, char* argv[]) {
   }
 
   if (user_config_file.read_enabled) {
-    // if no cache file found write to it
+    // Auto cache system: try cache first, if not found or old, refresh it
     if (!read_cache(&user_info)) {
+      // No cache found, create one for next time
       user_config_file.read_enabled  = false;
       user_config_file.write_enabled = true;
     } else {
+      // Cache found - use it for static info, only update dynamic ones
       int buf_sz = 256;
-      char buffer[buf_sz]; // line buffer
+      char buffer[buf_sz];
       struct thread_varg vargp = {
-          buffer, &user_info, NULL, {true, true, true, true, true, true, true, true}};
+          buffer, &user_info, NULL, {false, true, false, false, false, false, false, true}};
+      // Only get RAM and uptime (dynamic values)
       if (config_flags.show.ram) get_ram(&vargp);
       if (config_flags.show.uptime) {
-        LOG_I("getting additional not-cached info");
         get_sys(&user_info);
         get_upt(&vargp);
       }
